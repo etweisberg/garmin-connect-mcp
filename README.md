@@ -15,16 +15,23 @@ npm install -g @etweisberg/garmin-connect-mcp
 npx playwright install chromium
 ```
 
-Or register directly with Claude Code:
+Then register with Claude Code:
 
 ```bash
 claude mcp add garmin -- npx @etweisberg/garmin-connect-mcp
 ```
 
+You also need the Playwright MCP server for the login flow:
+
+```bash
+claude mcp add playwright -- npx @playwright/mcp@latest
+```
+
 ### Prerequisites
 
 - Node.js 18+
-- [Playwright MCP server](https://www.npmjs.com/package/@playwright/mcp) (`claude mcp add playwright -- npx @playwright/mcp@latest`) — needed for the login flow
+- Playwright MCP server (for browser-based login)
+- A Garmin Connect account with a synced device
 
 ## Setup
 
