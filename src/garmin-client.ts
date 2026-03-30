@@ -199,6 +199,77 @@ export class GarminClient {
     }
     return Buffer.from(result.data, "base64");
   }
+
+  async post(path: string, body: unknown): Promise<unknown> {
+    await this.init();
+
+    const url = `/gc-api/${path}`;
+    const csrfToken = this.csrfToken;
+    const bodyStr = JSON.stringify(body);
+
+    const result = await this.page.evaluate(
+      async ({
+        url,
+        csrfToken,
+        bodyStr,
+      }: {
+        url: string;
+        csrfToken: string;
+        bodyStr: string;
+      }) => {
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "connect-csrf-token": csrfToken,
+            "Content-Type": "application/json",
+            Accept: "application/json, */*",
+          },
+          body: bodyStr,
+        });
+        const text = await resp.text();
+        return { status: resp.status, body: text };
+      },
+      { url, csrfToken, bodyStr }
+    );
+
+    if (result.status === 204 || (result.status === 200 && !result.body)) {
+      return { noData: true, status: result.status, path };
+    }
+    if (result.status < 200 || result.status >= 300) {
+      throw new Error(`Garmin API ${result.status}: ${path} — ${result.body}`);
+    }
+    return JSON.parse(result.body);
+  }
+
+  async delete(path: string): Promise<unknown> {
+    await this.init();
+
+    const url = `/gc-api/${path}`;
+    const csrfToken = this.csrfToken;
+
+    const result = await this.page.evaluate(
+      async ({ url, csrfToken }: { url: string; csrfToken: string }) => {
+        const resp = await fetch(url, {
+          method: "DELETE",
+          headers: {
+            "connect-csrf-token": csrfToken,
+            Accept: "*/*",
+          },
+        });
+        const text = await resp.text();
+        return { status: resp.status, body: text };
+      },
+      { url, csrfToken }
+    );
+
+    if (result.status === 204 || (result.status === 200 && !result.body)) {
+      return { noData: true, status: result.status, path };
+    }
+    if (result.status < 200 || result.status >= 300) {
+      throw new Error(`Garmin API ${result.status}: ${path} — ${result.body}`);
+    }
+    return result.body ? JSON.parse(result.body) : { success: true };
+  }
 }
 
 // Singleton client for reuse across tool calls

@@ -577,6 +577,274 @@ To authenticate, you need the Playwright MCP server installed (\`@playwright/mcp
   );
 
   // ══════════════════════════════════════════════════════════════════
+  // Training & Recovery
+  // ══════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "get-training-readiness",
+    "Get training readiness score for a date (based on sleep, recovery, training load)",
+    {
+      date: z.string().optional().describe("YYYY-MM-DD, defaults to today"),
+    },
+    async ({ date }) => {
+      const client = getClient();
+      const d = date ?? todayDate();
+      const data = await client.get(
+        `metrics-service/metrics/trainingreadiness/${d}`
+      );
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "get-sleep-stats",
+    "Get sleep statistics over a date range (averages, trends)",
+    {
+      startDate: z.string().describe("Start date YYYY-MM-DD"),
+      endDate: z.string().describe("End date YYYY-MM-DD"),
+    },
+    async ({ startDate, endDate }) => {
+      const client = getClient();
+      const data = await client.get(
+        `sleep-service/stats/sleep/daily/${startDate}/${endDate}`
+      );
+      return jsonResult(data);
+    }
+  );
+
+  // ══════════════════════════════════════════════════════════════════
+  // Calendar, Goals, Badges
+  // ══════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "get-calendar",
+    "Get monthly calendar with activities, workouts, and events",
+    {
+      year: z.number().describe("Year (e.g. 2026)"),
+      month: z.number().describe("Month number 0-11 (0=January, 11=December)"),
+    },
+    async ({ year, month }) => {
+      const client = getClient();
+      const data = await client.get(
+        `calendar-service/year/${year}/month/${month}`
+      );
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "get-goals",
+    "Get fitness goals",
+    {
+      status: z
+        .string()
+        .default("active")
+        .describe("Goal status: active, future, or past"),
+    },
+    async ({ status }) => {
+      const client = getClient();
+      const data = await client.get("goal-service/goal/goals", { status });
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "get-badges",
+    "Get all earned badges/achievements",
+    {},
+    async () => {
+      const client = getClient();
+      const data = await client.get("badge-service/badge/earned");
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "get-badge-leaderboard",
+    "Get badge leaderboard among your connections",
+    {
+      limit: z.number().default(25).describe("Max entries to return"),
+    },
+    async ({ limit }) => {
+      const client = getClient();
+      const data = await client.get("badge-service/badge/leaderboard", {
+        limit,
+      });
+      return jsonResult(data);
+    }
+  );
+
+  // ══════════════════════════════════════════════════════════════════
+  // Hydration & Power Zones
+  // ══════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "get-hydration",
+    "Get daily hydration/water intake data",
+    {
+      date: z.string().optional().describe("YYYY-MM-DD, defaults to today"),
+    },
+    async ({ date }) => {
+      const client = getClient();
+      const d = date ?? todayDate();
+      const data = await client.get(
+        `usersummary-service/usersummary/hydration/allData/${d}`
+      );
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "get-power-zones",
+    "Get power zone configuration for all sports",
+    {},
+    async () => {
+      const client = getClient();
+      const data = await client.get("biometric-service/powerZones/sports/all");
+      return jsonResult(data);
+    }
+  );
+
+  // ══════════════════════════════════════════════════════════════════
+  // Workouts (read + write)
+  // ══════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "list-workouts",
+    "List your saved workouts",
+    {
+      start: z.number().default(0).describe("Pagination offset"),
+      limit: z.number().default(100).describe("Max workouts to return"),
+    },
+    async ({ start, limit }) => {
+      const client = getClient();
+      const data = await client.get("workout-service/workouts", {
+        start,
+        limit,
+      });
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "get-workout",
+    "Get a single workout by ID with full step/segment details",
+    {
+      workoutId: z.string().describe("The workout ID"),
+    },
+    async ({ workoutId }) => {
+      const client = getClient();
+      const data = await client.get(`workout-service/workout/${workoutId}`);
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "download-workout-fit",
+    "Download a workout as a FIT file",
+    {
+      workoutId: z.string().describe("The workout ID"),
+      outputDir: z
+        .string()
+        .default("./fit_files")
+        .describe("Directory to save the FIT file"),
+    },
+    async ({ workoutId, outputDir }) => {
+      const client = getClient();
+      const fitBytes = await client.getBytes(
+        `workout-service/workout/FIT/${workoutId}`
+      );
+      mkdirSync(outputDir, { recursive: true });
+      const outPath = join(outputDir, `workout_${workoutId}.fit`);
+      writeFileSync(outPath, fitBytes);
+      return textResult(
+        `Downloaded workout FIT: ${outPath} (${fitBytes.length} bytes)`
+      );
+    }
+  );
+
+  server.tool(
+    "create-workout",
+    `Create a new workout on Garmin Connect. Pass a workout JSON object with workoutName, sportType, and workoutSegments containing steps.
+
+Sport type IDs: 1=running, 2=cycling, 3=swimming, 4=walking, 5=multi, 6=fitness, 7=hiking.
+Step types: warmup (1), cooldown (2), interval (3), recovery (4), rest (5).
+End conditions: distance (1, meters), time (2, seconds), open (7).
+
+Example minimal running workout:
+{
+  "workoutName": "Easy 30min Run",
+  "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+  "workoutSegments": [{
+    "segmentOrder": 1,
+    "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    "workoutSteps": [{
+      "type": "ExecutableStepDTO",
+      "stepOrder": 1,
+      "stepType": {"stepTypeId": 1, "stepTypeKey": "warmup"},
+      "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+      "endConditionValue": 300,
+      "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+    }, {
+      "type": "ExecutableStepDTO",
+      "stepOrder": 2,
+      "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
+      "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+      "endConditionValue": 1200,
+      "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+    }, {
+      "type": "ExecutableStepDTO",
+      "stepOrder": 3,
+      "stepType": {"stepTypeId": 2, "stepTypeKey": "cooldown"},
+      "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+      "endConditionValue": 300,
+      "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+    }]
+  }]
+}`,
+    {
+      workout: z
+        .string()
+        .describe("JSON string of the workout object to create"),
+    },
+    async ({ workout }) => {
+      const client = getClient();
+      const workoutObj = JSON.parse(workout);
+      const data = await client.post("workout-service/workout", workoutObj);
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "schedule-workout",
+    "Schedule an existing workout to a date on your calendar. The workout will sync to your device.",
+    {
+      workoutId: z.string().describe("The workout ID"),
+      date: z.string().describe("Date to schedule YYYY-MM-DD"),
+    },
+    async ({ workoutId, date }) => {
+      const client = getClient();
+      const data = await client.post(`workout-service/schedule/${workoutId}`, {
+        date,
+      });
+      return jsonResult(data);
+    }
+  );
+
+  server.tool(
+    "delete-workout",
+    "Delete a workout from Garmin Connect",
+    {
+      workoutId: z.string().describe("The workout ID to delete"),
+    },
+    async ({ workoutId }) => {
+      const client = getClient();
+      await client.delete(`workout-service/workout/${workoutId}`);
+      return textResult(`Workout ${workoutId} deleted`);
+    }
+  );
+
+  // ══════════════════════════════════════════════════════════════════
   // Testing
   // ══════════════════════════════════════════════════════════════════
 

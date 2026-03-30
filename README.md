@@ -99,6 +99,14 @@ Session cookies expire after a few hours. Re-run the login flow when they do.
 | `get-body-battery` | Body battery charged/drained values |
 | `get-hrv`          | Heart rate variability data         |
 
+### Training & Recovery
+
+| Tool                     | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| `get-training-readiness` | Training readiness score (sleep, recovery, load) |
+| `get-sleep-stats`        | Sleep statistics over a date range               |
+| `get-hydration`          | Daily hydration/water intake data                |
+
 ### Weight / Records / Fitness
 
 | Tool                   | Description                           |
@@ -108,7 +116,28 @@ Session cookies expire after a few hours. Re-run the login flow when they do.
 | `get-fitness-stats`    | Aggregated activity stats by type     |
 | `get-vo2max`           | Latest VO2 Max estimate               |
 | `get-hr-zones-config`  | Heart rate zone boundaries            |
+| `get-power-zones`      | Power zone config for all sports      |
 | `get-user-profile`     | User profile and settings             |
+
+### Calendar, Goals & Badges
+
+| Tool                    | Description                                 |
+| ----------------------- | ------------------------------------------- |
+| `get-calendar`          | Monthly calendar with activities and events |
+| `get-goals`             | Active, future, or past fitness goals       |
+| `get-badges`            | All earned badges/achievements              |
+| `get-badge-leaderboard` | Badge leaderboard among connections         |
+
+### Workouts
+
+| Tool                   | Description                                        |
+| ---------------------- | -------------------------------------------------- |
+| `list-workouts`        | List saved workouts                                |
+| `get-workout`          | Get workout details (steps, segments)              |
+| `create-workout`       | Create a new workout (warmup, intervals, cooldown) |
+| `schedule-workout`     | Schedule a workout to a date (syncs to device)     |
+| `delete-workout`       | Delete a workout                                   |
+| `download-workout-fit` | Download a workout as a FIT file                   |
 
 ## Architecture
 

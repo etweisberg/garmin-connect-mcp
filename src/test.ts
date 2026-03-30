@@ -298,6 +298,147 @@ const tests: TestCase[] = [
         throw new Error("no zones returned");
     },
   },
+  // ── Training & Recovery ─────────────────────────────────────────
+  {
+    name: "get-training-readiness",
+    run: async (server) => {
+      const result = await callTool(server, "get-training-readiness");
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+  {
+    name: "get-sleep-stats",
+    run: async (server) => {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
+      const result = await callTool(server, "get-sleep-stats", {
+        startDate: sevenDaysAgo,
+        endDate: today,
+      });
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+
+  // ── Calendar, Goals, Badges ────────────────────────────────────────
+  {
+    name: "get-calendar",
+    run: async (server) => {
+      const result = await callTool(server, "get-calendar", {
+        year: 2026,
+        month: 2,
+      });
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+  {
+    name: "get-goals",
+    run: async (server) => {
+      const result = await callTool(server, "get-goals", { status: "active" });
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+  {
+    name: "get-badges",
+    run: async (server) => {
+      const result = await callTool(server, "get-badges");
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+  {
+    name: "get-badge-leaderboard",
+    run: async (server) => {
+      const result = await callTool(server, "get-badge-leaderboard", {
+        limit: 5,
+      });
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+
+  // ── Hydration & Power Zones ────────────────────────────────────────
+  {
+    name: "get-hydration",
+    run: async (server) => {
+      const result = await callTool(server, "get-hydration");
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+  {
+    name: "get-power-zones",
+    run: async (server) => {
+      const result = await callTool(server, "get-power-zones");
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+
+  // ── Workouts ───────────────────────────────────────────────────────
+  {
+    name: "list-workouts",
+    run: async (server) => {
+      const result = await callTool(server, "list-workouts", {
+        start: 0,
+        limit: 5,
+      });
+      if (result.isError) throw new Error(getToolText(result));
+    },
+  },
+  {
+    name: "workout CRUD (create -> schedule -> delete)",
+    run: async (server) => {
+      // Create
+      const workout = {
+        workoutName: "MCP Test Workout (safe to delete)",
+        sportType: { sportTypeId: 1, sportTypeKey: "running" },
+        workoutSegments: [
+          {
+            segmentOrder: 1,
+            sportType: { sportTypeId: 1, sportTypeKey: "running" },
+            workoutSteps: [
+              {
+                type: "ExecutableStepDTO",
+                stepOrder: 1,
+                stepType: { stepTypeId: 3, stepTypeKey: "interval" },
+                endCondition: {
+                  conditionTypeId: 2,
+                  conditionTypeKey: "time",
+                },
+                endConditionValue: 600,
+                targetType: {
+                  workoutTargetTypeId: 1,
+                  workoutTargetTypeKey: "no.target",
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const createResult = await callTool(server, "create-workout", {
+        workout: JSON.stringify(workout),
+      });
+      if (createResult.isError) throw new Error(getToolText(createResult));
+      const created = getToolJson(createResult) as { workoutId: number };
+      if (!created.workoutId) throw new Error("no workoutId returned");
+
+      const wid = String(created.workoutId);
+
+      // Schedule to tomorrow
+      const tomorrow = new Date(Date.now() + 86400000)
+        .toISOString()
+        .slice(0, 10);
+      const schedResult = await callTool(server, "schedule-workout", {
+        workoutId: wid,
+        date: tomorrow,
+      });
+      if (schedResult.isError) throw new Error(getToolText(schedResult));
+
+      // Delete (cleanup)
+      const delResult = await callTool(server, "delete-workout", {
+        workoutId: wid,
+      });
+      if (delResult.isError) throw new Error(getToolText(delResult));
+    },
+  },
 ];
 
 // Resolved during bootstrap
