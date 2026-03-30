@@ -68,8 +68,6 @@ jobs:
         run: npm publish --provenance --access public
       - name: Create GitHub Release
         if: steps.check.outputs.skip == 'false'
-        run: |
-          sleep 5
-          gh release create ${{ steps.version.outputs.version }} --verify-tag --generate-notes
+        run: gh release create ${{ steps.version.outputs.version }} --target ${{ github.sha }} --generate-notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
