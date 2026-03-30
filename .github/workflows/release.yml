@@ -26,7 +26,6 @@ jobs:
   release:
     needs: ci
     runs-on: ubuntu-latest
-    environment: npm
     steps:
       - uses: actions/checkout@v4
         with:
