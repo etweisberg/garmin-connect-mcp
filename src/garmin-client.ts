@@ -89,19 +89,13 @@ export class GarminClient {
 
     this.page = await context.newPage();
 
-    // Navigate to Garmin Connect to establish the Cloudflare session
-    await this.page.goto("https://connect.garmin.com/app/activities", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-
-    // Verify we got the CSRF token (page loaded successfully)
-    const csrf: string | null = await this.page.evaluate(
-      "() => document.querySelector('meta[name=\"csrf-token\"]')?.content ?? null"
+    // Navigate to a static endpoint on connect.garmin.com to set the origin.
+    // We avoid /app/* routes because they redirect through sso.garmin.com
+    // which may be rate-limited by Cloudflare.
+    await this.page.goto(
+      "https://connect.garmin.com/site-status/garmin-connect-status.json",
+      { waitUntil: "domcontentloaded", timeout: 30000 }
     );
-    if (csrf) {
-      this.csrfToken = csrf;
-    }
 
     this.initialized = true;
     console.error("Garmin browser session initialized");
