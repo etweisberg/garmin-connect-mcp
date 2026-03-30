@@ -2,18 +2,35 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run build
+
   release:
+    needs: ci
     runs-on: ubuntu-latest
     environment: npm
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -21,9 +38,26 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run build
-      - run: npm publish --provenance --access public
+
+      # Bump patch version, commit, and tag
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Bump version
+        id: version
+        run: |
+          NEW_VERSION=$(npm version patch --no-git-tag-version)
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          git add package.json package-lock.json
+          git commit -m "release: $NEW_VERSION"
+          git tag "$NEW_VERSION"
+          git push --follow-tags
+      - name: Publish to npm
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: gh release create ${{ github.ref_name }} --generate-notes
+      - name: Create GitHub Release
+        run: gh release create ${{ steps.version.outputs.version }} --generate-notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
