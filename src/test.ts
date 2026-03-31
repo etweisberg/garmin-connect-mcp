@@ -8,7 +8,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerTools } from "./tools.js";
+import { registerTools, registerResources } from "./tools.js";
 import { existsSync, rmSync } from "node:fs";
 import { getSharedClient } from "./garmin-client.js";
 
@@ -17,6 +17,10 @@ const TEST_FIT_DIR = "/tmp/garmin-mcp-test-fit";
 interface ToolResult {
   content: { type: string; text: string }[];
   isError?: boolean;
+}
+
+interface ResourceResult {
+  contents: { uri: string; mimeType: string; text: string }[];
 }
 
 async function callTool(
@@ -32,6 +36,18 @@ async function callTool(
   return result;
 }
 
+async function callResource(
+  server: McpServer,
+  uri: string
+): Promise<ResourceResult> {
+  const resource = (server as any)._registeredResources[uri];
+  if (!resource) throw new Error(`Resource not registered: ${uri}`);
+  const result = (await resource.readCallback(new URL(uri), {
+    signal: new AbortController().signal,
+  })) as ResourceResult;
+  return result;
+}
+
 function getToolText(result: ToolResult): string {
   return result.content[0]?.text ?? "";
 }
@@ -44,6 +60,115 @@ interface TestCase {
   name: string;
   run: (server: McpServer) => Promise<void>;
 }
+
+// ── Resource tests (no session required) ──────────────────────────────
+const resourceTests: TestCase[] = [
+  {
+    name: "resource: workout://templates/simple-run",
+    run: async (server) => {
+      const uri = "workout://templates/simple-run";
+      const result = await callResource(server, uri);
+      if (!result.contents || result.contents.length === 0)
+        throw new Error("no contents");
+      const content = result.contents[0];
+      if (content.uri !== uri) throw new Error(`wrong uri: ${content.uri}`);
+      if (content.mimeType !== "application/json")
+        throw new Error(`wrong mimeType: ${content.mimeType}`);
+      const data = JSON.parse(content.text) as {
+        workoutName: string;
+        sportType: { sportTypeKey: string };
+        workoutSegments: unknown[];
+      };
+      if (!data.workoutName) throw new Error("no workoutName");
+      if (!data.sportType?.sportTypeKey) throw new Error("no sportTypeKey");
+      if (
+        !Array.isArray(data.workoutSegments) ||
+        data.workoutSegments.length === 0
+      )
+        throw new Error("no workoutSegments");
+    },
+  },
+  {
+    name: "resource: workout://templates/interval-running",
+    run: async (server) => {
+      const uri = "workout://templates/interval-running";
+      const result = await callResource(server, uri);
+      const content = result.contents[0];
+      if (content.mimeType !== "application/json")
+        throw new Error(`wrong mimeType: ${content.mimeType}`);
+      const data = JSON.parse(content.text) as {
+        workoutName: string;
+        workoutSegments: { workoutSteps: unknown[] }[];
+      };
+      if (data.workoutName !== "Interval Running")
+        throw new Error(`unexpected workoutName: ${data.workoutName}`);
+      // Interval running must have a RepeatGroupDTO
+      const steps = data.workoutSegments[0]?.workoutSteps ?? [];
+      const hasRepeatGroup = (steps as { type: string }[]).some(
+        (s) => s.type === "RepeatGroupDTO"
+      );
+      if (!hasRepeatGroup) throw new Error("missing RepeatGroupDTO");
+    },
+  },
+  {
+    name: "resource: workout://templates/tempo-run",
+    run: async (server) => {
+      const uri = "workout://templates/tempo-run";
+      const result = await callResource(server, uri);
+      const content = result.contents[0];
+      const data = JSON.parse(content.text) as {
+        workoutName: string;
+        sportType: { sportTypeKey: string };
+        workoutSegments: { workoutSteps: unknown[] }[];
+      };
+      if (data.workoutName !== "Tempo Run")
+        throw new Error(`unexpected workoutName: ${data.workoutName}`);
+      if (data.sportType.sportTypeKey !== "running")
+        throw new Error("expected running sport type");
+      const steps = data.workoutSegments[0]?.workoutSteps ?? [];
+      if ((steps as unknown[]).length < 3)
+        throw new Error("expected at least warmup/interval/cooldown steps");
+    },
+  },
+  {
+    name: "resource: workout://templates/strength-circuit",
+    run: async (server) => {
+      const uri = "workout://templates/strength-circuit";
+      const result = await callResource(server, uri);
+      const content = result.contents[0];
+      const data = JSON.parse(content.text) as {
+        workoutName: string;
+        sportType: { sportTypeKey: string };
+        workoutSegments: { workoutSteps: unknown[] }[];
+      };
+      if (data.workoutName !== "Strength Circuit")
+        throw new Error(`unexpected workoutName: ${data.workoutName}`);
+      if (data.sportType.sportTypeKey !== "fitness_equipment")
+        throw new Error("expected fitness_equipment sport type");
+      // Must have a RepeatGroupDTO
+      const steps = data.workoutSegments[0]?.workoutSteps ?? [];
+      const hasRepeatGroup = (steps as { type: string }[]).some(
+        (s) => s.type === "RepeatGroupDTO"
+      );
+      if (!hasRepeatGroup) throw new Error("missing RepeatGroupDTO");
+    },
+  },
+  {
+    name: "resource: workout://reference/structure",
+    run: async (server) => {
+      const uri = "workout://reference/structure";
+      const result = await callResource(server, uri);
+      if (!result.contents || result.contents.length === 0)
+        throw new Error("no contents");
+      const content = result.contents[0];
+      if (content.uri !== uri) throw new Error(`wrong uri: ${content.uri}`);
+      if (content.mimeType !== "text/markdown")
+        throw new Error(`wrong mimeType: ${content.mimeType}`);
+      if (!content.text.includes("Workout"))
+        throw new Error("reference text missing expected content");
+    },
+  },
+];
 
 const tests: TestCase[] = [
   // ── Session ────────────────────────────────────────────────────────
@@ -447,14 +572,37 @@ let activityId = "";
 async function main() {
   console.log("garmin-connect-mcp integration tests (tool-level)\n");
 
-  // Set up a real MCP server with all tools registered
+  // Set up a real MCP server with all tools and resources registered
   const server = new McpServer({
     name: "garmin-connect-mcp-test",
     version: "0.0.0",
   });
   registerTools(server);
+  registerResources(server);
 
-  // Bootstrap: get a recent activityId
+  // ── Run resource tests (no session required) ────────────────────────
+  console.log("── Resources (no session required) ──\n");
+  let passed = 0;
+  let failed = 0;
+
+  for (const test of resourceTests) {
+    const start = Date.now();
+    try {
+      await test.run(server);
+      const ms = Date.now() - start;
+      console.log(`  PASS  ${test.name} (${ms}ms)`);
+      passed++;
+    } catch (e) {
+      const ms = Date.now() - start;
+      const msg = e instanceof Error ? e.message : String(e);
+      const short = msg.length > 120 ? msg.slice(0, 120) + "..." : msg;
+      console.log(`  FAIL  ${test.name} (${ms}ms) — ${short}`);
+      failed++;
+    }
+  }
+
+  // ── Bootstrap: get a recent activityId ─────────────────────────────
+  console.log("\n── Integration tests (session required) ──\n");
   console.log("Bootstrapping...");
   const listResult = await callTool(server, "list-activities", {
     limit: 1,
@@ -467,9 +615,6 @@ async function main() {
     process.exit(1);
   }
   console.log(`  activityId: ${activityId}\n`);
-
-  let passed = 0;
-  let failed = 0;
 
   for (const test of tests) {
     const start = Date.now();

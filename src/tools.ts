@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import {
   getSharedClient,
   sessionExists,
@@ -765,15 +766,36 @@ To authenticate, you need the Playwright MCP server installed (\`@playwright/mcp
 
   server.tool(
     "create-workout",
-    `Create a new workout on Garmin Connect. Pass a workout JSON object with workoutName, sportType, and workoutSegments containing steps.
+    `Upload a workout from JSON data.
+
+Creates a new workout in Garmin Connect from structured workout data.
+
+IMPORTANT: Step types must use Garmin's DTO format:
+- Use "ExecutableStepDTO" for regular steps (warmup, interval, cooldown, recovery)
+- Use "RepeatGroupDTO" for repeat/interval groups with numberOfIterations
+
+IMPORTANT: For heart rate zone targets, use "zoneNumber" (1-5), NOT targetValueOne/targetValueTwo.
+targetValueOne/targetValueTwo are only for absolute value ranges (e.g. pace in m/s, power in watts).
 
 Sport type IDs: 1=running, 2=cycling, 3=swimming, 4=walking, 5=multi, 6=fitness, 7=hiking.
-Step types: warmup (1), cooldown (2), interval (3), recovery (4), rest (5).
-End conditions: distance (1, meters), time (2, seconds), open (7).
+Step type IDs: warmup (1), cooldown (2), interval (3), recovery (4), rest (5).
+End condition IDs: distance (1, value in meters), time (2, value in seconds), open (7, no value needed).
+Target type IDs: no.target (1), speed (2, m/s range via targetValueOne/targetValueTwo), heart.rate.zone (4, use zoneNumber 1-5), power.zone (11, use zoneNumber).
 
-Example minimal running workout:
+**Available Templates:**
+Instead of building workout JSON from scratch, use these MCP resources as starting points:
+- workout://templates/simple-run - Basic warmup/run/cooldown structure
+- workout://templates/interval-running - Interval training with repeat groups
+- workout://templates/tempo-run - Tempo run with heart rate zone targets
+- workout://templates/strength-circuit - Strength training circuit structure
+- workout://reference/structure - Complete JSON structure reference with all fields
+
+Access these resources using your MCP client's resource reading capability, modify the template
+as needed, and pass the resulting JSON as the workout parameter.
+
+Example workout structure with HR zone target:
 {
-  "workoutName": "Easy 30min Run",
+  "workoutName": "My Workout",
   "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
   "workoutSegments": [{
     "segmentOrder": 1,
@@ -781,25 +803,65 @@ Example minimal running workout:
     "workoutSteps": [{
       "type": "ExecutableStepDTO",
       "stepOrder": 1,
-      "stepType": {"stepTypeId": 1, "stepTypeKey": "warmup"},
-      "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
-      "endConditionValue": 300,
-      "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
-    }, {
-      "type": "ExecutableStepDTO",
-      "stepOrder": 2,
       "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
       "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
-      "endConditionValue": 1200,
-      "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
-    }, {
-      "type": "ExecutableStepDTO",
-      "stepOrder": 3,
-      "stepType": {"stepTypeId": 2, "stepTypeKey": "cooldown"},
-      "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
-      "endConditionValue": 300,
-      "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+      "endConditionValue": 1200.0,
+      "targetType": {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"},
+      "zoneNumber": 3
     }]
+  }]
+}
+
+Example with RepeatGroupDTO for intervals:
+{
+  "workoutName": "Interval Run",
+  "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+  "workoutSegments": [{
+    "segmentOrder": 1,
+    "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    "workoutSteps": [
+      {
+        "type": "ExecutableStepDTO",
+        "stepOrder": 1,
+        "stepType": {"stepTypeId": 1, "stepTypeKey": "warmup"},
+        "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+        "endConditionValue": 600.0,
+        "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+      },
+      {
+        "type": "RepeatGroupDTO",
+        "stepOrder": 2,
+        "numberOfIterations": 6,
+        "workoutSteps": [
+          {
+            "type": "ExecutableStepDTO",
+            "stepOrder": 1,
+            "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
+            "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+            "endConditionValue": 60.0,
+            "targetType": {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"},
+            "zoneNumber": 5
+          },
+          {
+            "type": "ExecutableStepDTO",
+            "stepOrder": 2,
+            "stepType": {"stepTypeId": 4, "stepTypeKey": "recovery"},
+            "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+            "endConditionValue": 90.0,
+            "targetType": {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"},
+            "zoneNumber": 2
+          }
+        ]
+      },
+      {
+        "type": "ExecutableStepDTO",
+        "stepOrder": 3,
+        "stepType": {"stepTypeId": 2, "stepTypeKey": "cooldown"},
+        "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+        "endConditionValue": 600.0,
+        "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+      }
+    ]
   }]
 }`,
     {
@@ -912,7 +974,318 @@ Count total passed vs failed at the end.`);
   );
 }
 
-import { inflateRawSync } from "node:zlib";
+// ── Workout Templates (MCP Resources) ──────────────────────────────────────
+// Templates adapted from Taxuspt/garmin_mcp (MIT License, Copyright (c) 2025 Alexandre Domingues)
+// https://github.com/Taxuspt/garmin_mcp/blob/main/src/garmin_mcp/workout_templates.py
+
+const WORKOUT_TEMPLATES: Record<string, unknown> = {
+  "simple-run": {
+    workoutName: "Simple Run",
+    sportType: { sportTypeId: 1, sportTypeKey: "running" },
+    workoutSegments: [
+      {
+        segmentOrder: 1,
+        sportType: { sportTypeId: 1, sportTypeKey: "running" },
+        workoutSteps: [
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 1,
+            stepType: { stepTypeId: 1, stepTypeKey: "warmup" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 300.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 2,
+            stepType: { stepTypeId: 3, stepTypeKey: "interval" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 1800.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 3,
+            stepType: { stepTypeId: 2, stepTypeKey: "cooldown" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 300.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+        ],
+      },
+    ],
+  },
+
+  "interval-running": {
+    workoutName: "Interval Running",
+    sportType: { sportTypeId: 1, sportTypeKey: "running" },
+    workoutSegments: [
+      {
+        segmentOrder: 1,
+        sportType: { sportTypeId: 1, sportTypeKey: "running" },
+        workoutSteps: [
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 1,
+            stepType: { stepTypeId: 1, stepTypeKey: "warmup" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 600.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+          {
+            type: "RepeatGroupDTO",
+            stepOrder: 2,
+            numberOfIterations: 6,
+            workoutSteps: [
+              {
+                type: "ExecutableStepDTO",
+                stepOrder: 1,
+                stepType: { stepTypeId: 3, stepTypeKey: "interval" },
+                endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+                endConditionValue: 60.0,
+                targetType: {
+                  workoutTargetTypeId: 4,
+                  workoutTargetTypeKey: "heart.rate.zone",
+                },
+                zoneNumber: 5,
+              },
+              {
+                type: "ExecutableStepDTO",
+                stepOrder: 2,
+                stepType: { stepTypeId: 4, stepTypeKey: "recovery" },
+                endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+                endConditionValue: 90.0,
+                targetType: {
+                  workoutTargetTypeId: 4,
+                  workoutTargetTypeKey: "heart.rate.zone",
+                },
+                zoneNumber: 2,
+              },
+            ],
+          },
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 3,
+            stepType: { stepTypeId: 2, stepTypeKey: "cooldown" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 600.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+        ],
+      },
+    ],
+  },
+
+  "tempo-run": {
+    workoutName: "Tempo Run",
+    sportType: { sportTypeId: 1, sportTypeKey: "running" },
+    workoutSegments: [
+      {
+        segmentOrder: 1,
+        sportType: { sportTypeId: 1, sportTypeKey: "running" },
+        workoutSteps: [
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 1,
+            stepType: { stepTypeId: 1, stepTypeKey: "warmup" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 600.0,
+            targetType: {
+              workoutTargetTypeId: 4,
+              workoutTargetTypeKey: "heart.rate.zone",
+            },
+            zoneNumber: 2,
+          },
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 2,
+            stepType: { stepTypeId: 3, stepTypeKey: "interval" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 1200.0,
+            targetType: {
+              workoutTargetTypeId: 4,
+              workoutTargetTypeKey: "heart.rate.zone",
+            },
+            zoneNumber: 4,
+          },
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 3,
+            stepType: { stepTypeId: 2, stepTypeKey: "cooldown" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 600.0,
+            targetType: {
+              workoutTargetTypeId: 4,
+              workoutTargetTypeKey: "heart.rate.zone",
+            },
+            zoneNumber: 2,
+          },
+        ],
+      },
+    ],
+  },
+
+  "strength-circuit": {
+    workoutName: "Strength Circuit",
+    sportType: { sportTypeId: 6, sportTypeKey: "fitness_equipment" },
+    workoutSegments: [
+      {
+        segmentOrder: 1,
+        sportType: { sportTypeId: 6, sportTypeKey: "fitness_equipment" },
+        workoutSteps: [
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 1,
+            stepType: { stepTypeId: 1, stepTypeKey: "warmup" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 300.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+          {
+            type: "RepeatGroupDTO",
+            stepOrder: 2,
+            numberOfIterations: 3,
+            workoutSteps: [
+              {
+                type: "ExecutableStepDTO",
+                stepOrder: 1,
+                stepType: { stepTypeId: 3, stepTypeKey: "interval" },
+                endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+                endConditionValue: 40.0,
+                targetType: {
+                  workoutTargetTypeId: 1,
+                  workoutTargetTypeKey: "no.target",
+                },
+                description: "Exercise (e.g. push-ups, squats, rows)",
+              },
+              {
+                type: "ExecutableStepDTO",
+                stepOrder: 2,
+                stepType: { stepTypeId: 5, stepTypeKey: "rest" },
+                endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+                endConditionValue: 20.0,
+                targetType: {
+                  workoutTargetTypeId: 1,
+                  workoutTargetTypeKey: "no.target",
+                },
+              },
+            ],
+          },
+          {
+            type: "ExecutableStepDTO",
+            stepOrder: 3,
+            stepType: { stepTypeId: 2, stepTypeKey: "cooldown" },
+            endCondition: { conditionTypeId: 2, conditionTypeKey: "time" },
+            endConditionValue: 300.0,
+            targetType: {
+              workoutTargetTypeId: 1,
+              workoutTargetTypeKey: "no.target",
+            },
+          },
+        ],
+      },
+    ],
+  },
+};
+
+const WORKOUT_STRUCTURE_REFERENCE = `# Garmin Connect Workout JSON Structure Reference
+
+## Top-level fields
+- workoutName: string (required)
+- sportType: { sportTypeId: number, sportTypeKey: string } (required)
+  - IDs: 1=running, 2=cycling, 3=swimming, 4=walking, 5=multi, 6=fitness_equipment, 7=hiking
+- workoutSegments: array of segment objects (required)
+- description: string (optional)
+
+## Segment fields
+- segmentOrder: number (1-based, required)
+- sportType: same as top-level (required)
+- workoutSteps: array of step objects (required)
+
+## Step types
+
+### ExecutableStepDTO (regular steps)
+- type: "ExecutableStepDTO" (required)
+- stepOrder: number (1-based within the containing steps array)
+- stepType: { stepTypeId: number, stepTypeKey: string }
+  - 1="warmup", 2="cooldown", 3="interval", 4="recovery", 5="rest"
+- endCondition: { conditionTypeId: number, conditionTypeKey: string }
+  - 1="distance" (endConditionValue in meters)
+  - 2="time" (endConditionValue in seconds)
+  - 7="lap.button" (press lap button; no endConditionValue needed)
+- endConditionValue: number (required for distance/time conditions)
+- targetType: { workoutTargetTypeId: number, workoutTargetTypeKey: string }
+  - 1="no.target"
+  - 2="speed" — use targetValueOne/targetValueTwo (m/s)
+  - 4="heart.rate.zone" — use zoneNumber (1-5), NOT targetValueOne/targetValueTwo
+  - 6="cadence" — use targetValueOne/targetValueTwo (steps per minute)
+  - 11="power.zone" — use zoneNumber
+- zoneNumber: number 1-5 (for heart.rate.zone or power.zone targets only)
+- targetValueOne: number (lower bound for speed/cadence ranges)
+- targetValueTwo: number (upper bound for speed/cadence ranges)
+- description: string (optional, displayed on device)
+
+### RepeatGroupDTO (repeat blocks)
+- type: "RepeatGroupDTO" (required)
+- stepOrder: number (1-based within the containing steps array)
+- numberOfIterations: number (how many times to repeat)
+- workoutSteps: array of ExecutableStepDTO (the steps to repeat)
+  - stepOrder within this array is 1-based and independent of the parent
+
+## Notes
+- NEVER use targetValueOne/targetValueTwo for heart rate zones — use zoneNumber instead.
+  Using targetValueOne/targetValueTwo with heart.rate.zone target type causes Garmin to
+  misinterpret the values as pace (m/s), resulting in impossible paces like ~11 sec/mile.
+- RepeatGroupDTO cannot be nested inside another RepeatGroupDTO.
+- All stepOrder values within the same array must be sequential starting from 1.
+`;
+
+export function registerResources(server: McpServer): void {
+  for (const [name, template] of Object.entries(WORKOUT_TEMPLATES)) {
+    const uri = `workout://templates/${name}`;
+    server.resource(name, uri, async (resourceUri) => ({
+      contents: [
+        {
+          uri: resourceUri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(template, null, 2),
+        },
+      ],
+    }));
+  }
+
+  server.resource(
+    "workout-structure-reference",
+    "workout://reference/structure",
+    async (resourceUri) => ({
+      contents: [
+        {
+          uri: resourceUri.href,
+          mimeType: "text/markdown",
+          text: WORKOUT_STRUCTURE_REFERENCE,
+        },
+      ],
+    })
+  );
+}
 
 /**
  * Minimal zip extraction — finds the first .fit file using the central
