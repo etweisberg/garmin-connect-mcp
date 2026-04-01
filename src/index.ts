@@ -2,7 +2,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { registerTools } from "./tools.js";
+import { registerTools, registerResources } from "./tools.js";
 
 async function startMcpServer(): Promise<void> {
   const server = new McpServer({
@@ -11,6 +11,7 @@ async function startMcpServer(): Promise<void> {
   });
 
   registerTools(server);
+  registerResources(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
