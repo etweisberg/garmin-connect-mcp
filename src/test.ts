@@ -143,8 +143,8 @@ const resourceTests: TestCase[] = [
       };
       if (data.workoutName !== "Strength Circuit")
         throw new Error(`unexpected workoutName: ${data.workoutName}`);
-      if (data.sportType.sportTypeKey !== "fitness_equipment")
-        throw new Error("expected fitness_equipment sport type");
+      if (data.sportType.sportTypeKey !== "strength_training")
+        throw new Error("expected strength_training sport type");
       // Must have a RepeatGroupDTO
       const steps = data.workoutSegments[0]?.workoutSteps ?? [];
       const hasRepeatGroup = (steps as { type: string }[]).some(
