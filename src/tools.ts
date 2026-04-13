@@ -349,6 +349,25 @@ To authenticate, you need the Playwright MCP server installed (\`@playwright/mcp
     }
   );
 
+  // ── set-activity-name ──────────────────────────────────────────────
+
+  server.tool(
+    "set-activity-name",
+    "Rename a Garmin activity. Garmin auto-names rides based on city/location ('Toronto Cycling') -- use this to give them more meaningful names.",
+    {
+      activityId: z.string().describe("The activity ID"),
+      name: z.string().describe("New activity name"),
+    },
+    async ({ activityId, name }) => {
+      const client = getClient();
+      const data = await client.put(`activity-service/activity/${activityId}`, {
+        activityId: Number(activityId),
+        activityName: name,
+      });
+      return jsonResult(data);
+    }
+  );
+
   // ── set-activity-gear ──────────────────────────────────────────────
 
   server.tool(
