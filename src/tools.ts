@@ -302,9 +302,11 @@ To authenticate, you need the Playwright MCP server installed (\`@playwright/mcp
     },
     async ({ activityId }) => {
       const client = getClient();
-      const data = await client.get(
-        `gear-service/gear/activity/${activityId}`
-      );
+      // Garmin uses the same filterGear endpoint for both list-by-user and
+      // list-by-activity, distinguished by query parameter.
+      const data = await client.get("gear-service/gear/filterGear", {
+        activityId,
+      });
       return jsonResult(data);
     }
   );
@@ -360,9 +362,9 @@ To authenticate, you need the Playwright MCP server installed (\`@playwright/mcp
       const client = getClient();
 
       // Get current gear on the activity
-      const currentRaw = (await client.get(
-        `gear-service/gear/activity/${activityId}`
-      )) as Array<Record<string, unknown>>;
+      const currentRaw = (await client.get("gear-service/gear/filterGear", {
+        activityId,
+      })) as Array<Record<string, unknown>>;
 
       // Unlink anything that's not the target
       const removed: string[] = [];
