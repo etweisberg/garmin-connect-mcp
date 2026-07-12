@@ -272,6 +272,149 @@ To authenticate, you need the Playwright MCP server installed (\`@playwright/mcp
     }
   );
 
+  // ══════════════════════════════════════════════════════════════════
+  // Gear (bikes, shoes, equipment)
+  // ══════════════════════════════════════════════════════════════════
+
+  // ── list-gear ──────────────────────────────────────────────────────
+
+  server.tool(
+    "list-gear",
+    "List all gear (bikes, shoes, equipment) registered to the authenticated user. Returns each item's uuid, displayName, gearTypeName, and retirement status.",
+    {},
+    async () => {
+      const client = getClient();
+      const userProfilePk = await client.getUserProfilePk();
+      const data = await client.get("gear-service/gear/filterGear", {
+        userProfilePk,
+      });
+      return jsonResult(data);
+    }
+  );
+
+  // ── get-activity-gear ──────────────────────────────────────────────
+
+  server.tool(
+    "get-activity-gear",
+    "Get the gear currently linked to a specific activity. An activity may have zero or more gear items attached.",
+    {
+      activityId: z.string().describe("The activity ID"),
+    },
+    async ({ activityId }) => {
+      const client = getClient();
+      // Garmin uses the same filterGear endpoint for both list-by-user and
+      // list-by-activity, distinguished by query parameter.
+      const data = await client.get("gear-service/gear/filterGear", {
+        activityId,
+      });
+      return jsonResult(data);
+    }
+  );
+
+  // ── link-gear-to-activity ──────────────────────────────────────────
+
+  server.tool(
+    "link-gear-to-activity",
+    "Link a gear item (bike, shoes, etc.) to an activity. Garmin's gear API is many-to-many: an activity can have multiple gear items attached. Use unlink-gear-from-activity to remove existing gear first if you want a clean swap.",
+    {
+      gearUuid: z
+        .string()
+        .describe("The gear UUID (from list-gear, the 'uuid' field)"),
+      activityId: z.string().describe("The activity ID"),
+    },
+    async ({ gearUuid, activityId }) => {
+      const client = getClient();
+      const data = await client.put(
+        `gear-service/gear/link/${gearUuid}/activity/${activityId}`
+      );
+      return jsonResult(data);
+    }
+  );
+
+  // ── unlink-gear-from-activity ──────────────────────────────────────
+
+  server.tool(
+    "unlink-gear-from-activity",
+    "Unlink a gear item from an activity. Removes the gear association without deleting the gear itself or the activity.",
+    {
+      gearUuid: z.string().describe("The gear UUID to unlink"),
+      activityId: z.string().describe("The activity ID"),
+    },
+    async ({ gearUuid, activityId }) => {
+      const client = getClient();
+      const data = await client.put(
+        `gear-service/gear/unlink/${gearUuid}/activity/${activityId}`
+      );
+      return jsonResult(data);
+    }
+  );
+
+  // ── set-activity-name ──────────────────────────────────────────────
+
+  server.tool(
+    "set-activity-name",
+    "Rename a Garmin activity. Garmin auto-names rides based on city/location ('Toronto Cycling') -- use this to give them more meaningful names.",
+    {
+      activityId: z.string().describe("The activity ID"),
+      name: z.string().describe("New activity name"),
+    },
+    async ({ activityId, name }) => {
+      const client = getClient();
+      const data = await client.put(`activity-service/activity/${activityId}`, {
+        activityId: Number(activityId),
+        activityName: name,
+      });
+      return jsonResult(data);
+    }
+  );
+
+  // ── set-activity-gear ──────────────────────────────────────────────
+
+  server.tool(
+    "set-activity-gear",
+    "Convenience tool: replace whatever gear is currently linked to an activity with a single specified gear item. Internally calls get-activity-gear to find existing links, unlinks them, then links the target gear. Use this when you want 'one bike per ride' semantics.",
+    {
+      gearUuid: z.string().describe("The target gear UUID to attach"),
+      activityId: z.string().describe("The activity ID"),
+    },
+    async ({ gearUuid, activityId }) => {
+      const client = getClient();
+
+      // Get current gear on the activity
+      const currentRaw = (await client.get("gear-service/gear/filterGear", {
+        activityId,
+      })) as Array<Record<string, unknown>>;
+
+      // Unlink anything that's not the target
+      const removed: string[] = [];
+      for (const g of currentRaw ?? []) {
+        const existingUuid = (g.uuid ?? g.gearUuid) as string | undefined;
+        if (existingUuid && existingUuid !== gearUuid) {
+          try {
+            await client.put(
+              `gear-service/gear/unlink/${existingUuid}/activity/${activityId}`
+            );
+            removed.push(existingUuid);
+          } catch {
+            // continue -- one removal failure shouldn't block the link
+          }
+        }
+      }
+
+      // Link the target gear
+      const linkResult = await client.put(
+        `gear-service/gear/link/${gearUuid}/activity/${activityId}`
+      );
+
+      return jsonResult({
+        activityId,
+        gearUuid,
+        unlinked: removed,
+        linkResult,
+      });
+    }
+  );
+
   // ── download-fit ───────────────────────────────────────────────────
 
   server.tool(
