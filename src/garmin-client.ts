@@ -52,7 +52,6 @@ export class GarminClient {
   private cookies: Cookie[];
   private initialized = false;
   private displayName: string | null = null;
-  private userProfilePk: number | null = null;
 
   constructor(sessionPath?: string) {
     const session = sessionPath
@@ -114,24 +113,6 @@ export class GarminClient {
       );
     }
     return this.displayName;
-  }
-
-  async getUserProfilePk(): Promise<number> {
-    if (this.userProfilePk !== null) return this.userProfilePk;
-    const settings = (await this.get(
-      "userprofile-service/userprofile/user-settings/"
-    )) as Record<string, unknown>;
-    // Try common field names for the numeric user profile ID
-    const id = (settings.id ?? (settings.userData as Record<string, unknown> | undefined)?.id) as
-      | number
-      | undefined;
-    if (id === undefined) {
-      throw new Error(
-        "Could not resolve userProfilePk from user-settings response"
-      );
-    }
-    this.userProfilePk = id;
-    return id;
   }
 
   async close(): Promise<void> {
@@ -285,51 +266,6 @@ export class GarminClient {
         return { status: resp.status, body: text };
       },
       { url, csrfToken }
-    );
-
-    if (result.status === 204 || (result.status === 200 && !result.body)) {
-      return { noData: true, status: result.status, path };
-    }
-    if (result.status < 200 || result.status >= 300) {
-      throw new Error(`Garmin API ${result.status}: ${path} — ${result.body}`);
-    }
-    return result.body ? JSON.parse(result.body) : { success: true };
-  }
-
-  async put(path: string, body?: unknown): Promise<unknown> {
-    await this.init();
-
-    const url = `/gc-api/${path}`;
-    const csrfToken = this.csrfToken;
-    const bodyStr = body !== undefined ? JSON.stringify(body) : null;
-
-    const result = await this.page.evaluate(
-      async ({
-        url,
-        csrfToken,
-        bodyStr,
-      }: {
-        url: string;
-        csrfToken: string;
-        bodyStr: string | null;
-      }) => {
-        const init: RequestInit = {
-          method: "PUT",
-          headers: {
-            "connect-csrf-token": csrfToken,
-            Accept: "application/json, */*",
-          },
-        };
-        if (bodyStr !== null) {
-          (init.headers as Record<string, string>)["Content-Type"] =
-            "application/json";
-          init.body = bodyStr;
-        }
-        const resp = await fetch(url, init);
-        const text = await resp.text();
-        return { status: resp.status, body: text };
-      },
-      { url, csrfToken, bodyStr }
     );
 
     if (result.status === 204 || (result.status === 200 && !result.body)) {
